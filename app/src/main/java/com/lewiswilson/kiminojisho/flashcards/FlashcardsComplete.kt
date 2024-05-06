@@ -23,7 +23,7 @@ class FlashcardsComplete : AppCompatActivity() {
         val statsText = "Review Accuracy: ${percent}%"
         fcCompleteBind.txtStats.text = statsText
 
-        fcCompleteBind.btnBackToReviews.setOnClickListener { v: View? ->
+        fcCompleteBind.btnBackToReviews.setOnClickListener { _: View? ->
             finish()
             startActivity(Intent(this@FlashcardsComplete, FlashcardsHome::class.java))
             overridePendingTransition(R.anim.slide_in_left, R.anim.slide_out_right)

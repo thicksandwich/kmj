@@ -64,10 +64,9 @@ class MyList : AppCompatActivity(), MyListAdapter.OnItemClickListener, MyListAda
 
         multiSelectMenuSetup()
 
-        myListBind.flbtnAdd.setOnClickListener { v: View? ->
+        myListBind.flbtnAdd.setOnClickListener { _: View? ->
             finish()
             startActivity(Intent(this@MyList, SearchPage::class.java)) }
-
     }
 
     override fun onResume() {
@@ -130,13 +129,14 @@ class MyList : AppCompatActivity(), MyListAdapter.OnItemClickListener, MyListAda
 
             override fun onQueryTextChange(searchtext: String?): Boolean {
                 // populate the recyclerview on search query change
-                if(searchtext!!.isNotEmpty()){
+                if(searchtext!!.isNotEmpty()) {
                     jishoList!!.clear()
-                    val search = searchtext.toLowerCase(Locale.getDefault())
+                    val search = searchtext.lowercase(Locale.getDefault())
                     searchList!!.forEach {
-                        if(it.english.toLowerCase(Locale.getDefault()).contains(search) or
-                            it.kana.toLowerCase(Locale.getDefault()).contains(search) or
-                            it.kanji.toLowerCase(Locale.getDefault()).contains(search)){
+                        if (it.english.lowercase(Locale.getDefault()).contains(search) or
+                            it.kana.lowercase(Locale.getDefault()).contains(search) or
+                            it.kanji.lowercase(Locale.getDefault()).contains(search)
+                        ) {
 
                             jishoList!!.add(it)
                         }

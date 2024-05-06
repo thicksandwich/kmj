@@ -173,10 +173,9 @@ class Flashcards : AppCompatActivity() {
                 Log.d(TAG, "correct item: $item , index: ${validateArray.indexOf(item) + 1}") //correct
             }
         }
-
         val incorrectItems = myDB?.randomThreeWrong(flashcardList?.first()?.kanji!!, selectedList)
 
-        var correctEnglish = ""
+        val correctEnglish: String
         val correctItemText: String
         val wrongItemText1: String
         val wrongItemText2: String

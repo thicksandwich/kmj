@@ -47,7 +47,7 @@ class FlashcardsHome : AppCompatActivity() {
         }
 
 
-        fcHomeBind.btnStart.setOnClickListener { v: View? ->
+        fcHomeBind.btnStart.setOnClickListener { _: View? ->
             if (myDB!!.itemCount(0) < 4) {
                 Toast.makeText(this, "Not enough words to start reviewing! Add some new words to get started!", Toast.LENGTH_LONG).show()
             } else {

@@ -10,11 +10,9 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.lewiswilson.kiminojisho.DatabaseHelper
 import com.lewiswilson.kiminojisho.R
 import com.lewiswilson.kiminojisho.databinding.ListSelectionBinding
-import com.lewiswilson.kiminojisho.databinding.MyListBinding
 import java.util.*
 
 
@@ -49,11 +47,11 @@ class ListSelection : AppCompatActivity() {
                 intent.putExtra("listID", listId)
                 startActivity(intent)
             }
-            override fun onDeleteClick(listId: Int, adapterPos: Int) {
+            override fun onDeleteClick(listId: Int, pos: Int) {
                 if (listOfLists?.size!! <= 1) {
                     Toast.makeText(applicationContext, "You must have at least 1 list!", Toast.LENGTH_SHORT).show()
                 } else {
-                    warningDialog(listId, adapterPos)
+                    warningDialog(listId, pos)
                 }
             }
         })
