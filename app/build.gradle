@@ -16,12 +16,9 @@ android {
         versionCode 12
         versionName '1.4'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-<<<<<<< Updated upstream
-=======
         ndk {
             abiFilters "arm64-v8a", "x86_64", "x86"
         }
->>>>>>> Stashed changes
     }
     buildTypes {
         release {
@@ -34,8 +31,6 @@ android {
         viewBinding true
     }
     namespace 'com.lewiswilson.kiminojisho'
-<<<<<<< Updated upstream
-=======
 }
 
 chaquopy {
@@ -52,7 +47,6 @@ chaquopy {
             srcDir("src/main/python")
         }
     }
->>>>>>> Stashed changes
 }
 
 dependencies {
@@ -70,10 +64,7 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
-<<<<<<< Updated upstream
-=======
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
->>>>>>> Stashed changes
 
     // 3rd party libraries
     implementation 'com.github.wajahatkarim3:EasyFlipView:3.0.0'
