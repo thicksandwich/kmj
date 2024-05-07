@@ -5,27 +5,24 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.View
-import android.widget.Button
 import android.widget.SearchView
-import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.lewiswilson.kiminojisho.*
-import com.lewiswilson.kiminojisho.databinding.MyListBinding
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
+import com.lewiswilson.kiminojisho.AddWord
+import com.lewiswilson.kiminojisho.DatabaseHelper
 import com.lewiswilson.kiminojisho.databinding.SearchPageBinding
-import com.lewiswilson.kiminojisho.json.Japanese
-import com.lewiswilson.kiminojisho.json.JishoData
-import com.lewiswilson.kiminojisho.json.RetrofitClient
 import com.lewiswilson.kiminojisho.mylists.MyListItem
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
-import java.util.*
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
-import java.lang.NullPointerException
-import kotlin.collections.ArrayList
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import org.json.JSONArray
 
 class SearchPage : AppCompatActivity(), CoroutineScope {
 
@@ -36,8 +33,6 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
     private val myDB = DatabaseHelper(this)
     var queryTextChangedJob: Job? = null
     var currentJobText = ""
-    var networkCalls = 0
-    var call: Call<JishoData>? = null
 
     private val job = Job()
     override val coroutineContext = job + Dispatchers.Main
@@ -71,7 +66,6 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
                 if (newText != null) {
                     try {
                         mSearchList?.let {
-                            call?.cancel()
                             queryTextChangedJob?.cancel()
                             clearData()
                         }
@@ -86,11 +80,7 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
                             TAG,
                             "onQueryTextChange: Job Started For: $currentJobText, (strlen: ${currentJobText.length})"
                         )
-                        dataFromNetwork(newText)
-                        networkCalls++
-
-                        //logs the number of calls made to check the delay has been applied
-                        Log.d(TAG, "onQueryTextChange: NETWORK CALLS: $networkCalls")
+                        dataFromJamdict(newText)
                     }
 
                 }
@@ -101,103 +91,101 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
 
     }
 
-    //get API data
-    private fun dataFromNetwork(query: String) {
+    //Jamdict searchData
+    private fun dataFromJamdict(query: String) {
 
         searchPageBind.tvInfo.visibility = View.INVISIBLE
         //if the search adapter has data in it already, clear the recyclerview
         searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
 
-        //if the searchtext contains any japanese...
-        call = RetrofitClient.getInstance().myApi.getData(query)
+        if(!Python.isStarted()) {
+            Python.start(AndroidPlatform(this))
+        } else {
+            return
+        }
 
-        call?.enqueue(object : Callback<JishoData> {
-            override fun onResponse(call: Call<JishoData>, response: Response<JishoData>) {
+        val py = Python.getInstance()
+        val pyObj = py.getModule("search")
+        val searchResultsJson = pyObj.callAttr("lookup", query).toString()
 
-                //At this point we got our word list
-                val data = response.body()?.data
+        val searchResults = parseJson(searchResultsJson)
 
-                //if no data was found, try a call assuming romaji style
-                if (data?.isEmpty() == true) {
-                    searchPageBind.tvInfo.visibility = View.VISIBLE
-                    searchPageBind.tvInfo.text = getString(R.string.no_results)
-                }
+        var kanji: String
+        var kana: String
+        var english: String
+        for ((index, item) in searchResults.withIndex()) {
+            kana = item.kana[0].text
+            kanji = if (item.kanji.isNotEmpty()) item.kanji[0].text!! else kana
 
-                //try to retrieve data from jishoAPI
-                try {
-                    var japanese: List<Japanese>
-                    var kanji: String?
-                    var kana: String?
-                    var english: String?
-                    for (i in data?.indices!!) {
-                        japanese = data[i].japanese
-                        kanji = japanese[0].word
-                        kana = japanese[0].reading
+            english = item.senses.flatMap { it ->
+                it.senseGloss.map { it.text }
+            }.joinToString(", ")
 
-                        //if the result has no associated kanji
-                        if (kanji == null) {
-                            kanji = kana
-                        }
+            starFilled = myDB.checkStarred(kanji, english)
 
-                        //get english definitions
-                        val senses = data[i].senses
+            // items to view in searchpage activity
+            mSearchList!!.add(
+                SearchDataItem(kanji, kana, english, starFilled)
+            )
 
-                        english = ""
-                        var pos = ""
-                        var notes = ""
-                        for (item in senses) {
-                            val currentDef = item.englishDefinitions.toString()
-                                .replace("[", "").replace("]", "")
-                            english += "$currentDef@@@"
+            // items to view in viewwordremote and viewword
+            dataItems!!.add(MyListItem(index, kanji, kana, english, "pos", "notes"))
 
-                            val currentPos = item.partsOfSpeech.toString()
-                                .replace("[", "").replace("]", "")
-                            pos += "$currentPos@@@"
-
-                            val currentNotes = item.tags.toString()
-                                .replace("[", "").replace("]", "")
-                            notes += "$currentNotes@@@"
-
-                        }
-                        english = removeAts(english)
-                        pos = removeAts(pos)
-                        notes = removeAts(notes)
-
-                        starFilled = myDB.checkStarred(kanji, english.split("@@@")[0])
-
-                        // items to view in searchpage activity
-                        mSearchList!!.add(SearchDataItem(kanji, kana,
-                            english.split("@@@")[0], starFilled))
-
-                        // items to view in viewwordremote and viewword
-                        dataItems!!.add(MyListItem(i, kanji, kana, english, pos, notes))
-
-                        mSearchDataAdapter = mSearchList?.let { it ->
-                            SearchDataAdapter(this@SearchPage, it)
-                        }
-                        searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
-                    }
-
-                } catch (e: Exception) {
-                    Log.d("", "Data Retrieval Error: " + e.message)
-                }
+            mSearchDataAdapter = mSearchList?.let { it ->
+                SearchDataAdapter(this@SearchPage, it)
             }
+            searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
 
-            override fun onFailure(call: Call<JishoData>, t: Throwable) {
-                //handle error or failure cases here
-                Log.d(TAG, "SearchPage (Error): " + t.message)
-            }
-        })
+        }
+    }
+
+    @Serializable
+    data class Kanji(
+        val text: String?,
+        val pri: List<String>? = null
+    )
+
+    @Serializable
+    data class Kana(
+        val text: String,
+        val nokanji: Int,
+        val pri: List<String>? = null
+    )
+
+    @Serializable
+    data class SenseGloss(
+        val lang: String,
+        val text: String
+    )
+
+    @Serializable
+    data class Sense(
+        val pos: List<String>,
+        @SerialName("SenseGloss")
+        val senseGloss: List<SenseGloss>
+    )
+
+    @Serializable
+    data class JMDEntry(
+        val idseq: Int,
+        val kanji: List<Kanji>,
+        val kana: List<Kana>,
+        val senses: List<Sense>
+    )
+
+    private fun parseJson(jsonData: String): Array<JMDEntry> {
+        val jsonArray = JSONArray(jsonData)
+        val arrayofresults = Array(jsonArray.length()) { i ->
+            val jsonString = jsonArray.getJSONObject(i).toString()
+            Json.decodeFromString<JMDEntry>(jsonString)
+        }
+        return arrayofresults
     }
 
     fun clearData() {
         dataItems?.clear()
         mSearchList?.clear() // clear list
         mSearchDataAdapter?.notifyDataSetChanged() // let your adapter know about the changes and reload view.
-    }
-
-    fun removeAts(input: String): String {
-        return input.substring(0, input.length - 3)
     }
 
     override fun onDestroy() {
