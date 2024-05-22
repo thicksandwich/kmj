@@ -10,8 +10,6 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
 import com.lewiswilson.kiminojisho.databinding.SettingsBinding
 import java.text.DecimalFormat
 import java.util.*

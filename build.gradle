@@ -16,9 +16,7 @@ buildscript {
   }
 }
 
-// plugin to allow python to run in android app
 plugins {
-  id("com.chaquo.python") version "15.0.1" apply false
   id "org.jetbrains.kotlin.plugin.serialization" version "1.8.20" apply false
 }
 

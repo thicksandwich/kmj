@@ -8,8 +8,6 @@ import android.view.View
 import android.widget.SearchView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
 import com.lewiswilson.kiminojisho.AddWord
 import com.lewiswilson.kiminojisho.DatabaseHelper
 import com.lewiswilson.kiminojisho.databinding.SearchPageBinding
@@ -80,7 +78,7 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
                             TAG,
                             "onQueryTextChange: Job Started For: $currentJobText, (strlen: ${currentJobText.length})"
                         )
-                        dataFromJamdict(newText)
+                        if(newText.isNotEmpty()) dataFromJamdict(newText)
                     }
 
                 }
@@ -98,17 +96,17 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
         //if the search adapter has data in it already, clear the recyclerview
         searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
 
+        /*
         if(!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
-        } else {
-            return
         }
 
         val py = Python.getInstance()
         val pyObj = py.getModule("search")
         val searchResultsJson = pyObj.callAttr("lookup", query).toString()
+        */
 
-        val searchResults = parseJson(searchResultsJson)
+        val searchResults = parseJson()
 
         var kanji: String
         var kana: String
@@ -173,13 +171,13 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
         val senses: List<Sense>
     )
 
-    private fun parseJson(jsonData: String): Array<JMDEntry> {
-        val jsonArray = JSONArray(jsonData)
-        val arrayofresults = Array(jsonArray.length()) { i ->
+    private fun parseJson(): Array<JMDEntry> {
+        val jsonArray = JSONArray("")
+        val json = Json { ignoreUnknownKeys = true } // Ignore unknown keys
+        return Array(jsonArray.length()) { i ->
             val jsonString = jsonArray.getJSONObject(i).toString()
-            Json.decodeFromString<JMDEntry>(jsonString)
+            json.decodeFromString<JMDEntry>(jsonString)
         }
-        return arrayofresults
     }
 
     fun clearData() {

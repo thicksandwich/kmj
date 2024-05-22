@@ -1,6 +1,5 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
-apply plugin: 'com.chaquo.python'
 apply plugin: 'org.jetbrains.kotlin.plugin.serialization'
 
 android {
@@ -16,9 +15,6 @@ android {
         versionCode 12
         versionName '1.4'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        ndk {
-            abiFilters "arm64-v8a", "x86_64", "x86"
-        }
     }
     buildTypes {
         release {
@@ -31,22 +27,6 @@ android {
         viewBinding true
     }
     namespace 'com.lewiswilson.kiminojisho'
-}
-
-chaquopy {
-    defaultConfig {
-        buildPython("C:/Users/Lewis/AppData/Local/Programs/Python/Python38-32/python.exe")
-        pip {
-            install("wheel")
-            install("jamdict")
-            install("jamdict-data")
-        }
-    }
-    sourceSets {
-        getByName("main") {
-            srcDir("src/main/python")
-        }
-    }
 }
 
 dependencies {
