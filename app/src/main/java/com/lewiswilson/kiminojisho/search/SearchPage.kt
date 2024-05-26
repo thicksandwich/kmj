@@ -12,17 +12,15 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.lewiswilson.kiminojisho.AddWord
 import com.lewiswilson.kiminojisho.DatabaseHelper
+import com.lewiswilson.kiminojisho.R
 import com.lewiswilson.kiminojisho.databinding.SearchPageBinding
 import com.lewiswilson.kiminojisho.mylists.MyListItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import org.json.JSONArray
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 class SearchPage : AppCompatActivity(), CoroutineScope {
 
@@ -65,7 +63,6 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
                 return false
             }
             override fun onQueryTextChange(newText: String?): Boolean {
-
                 if (newText != null) {
                     try {
                         mSearchList?.let {
@@ -77,7 +74,6 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
                     }
 
                     queryTextChangedJob = launch {
-                        delay(350)
                         currentJobText = newText.toString()
                         Log.d(
                             TAG,
@@ -87,7 +83,6 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
                     }
 
                 }
-
                 return true
             }
         })
@@ -95,37 +90,21 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
     }
 
     private fun search(query: String) {
-
         searchPageBind.tvInfo.visibility = View.INVISIBLE
         //if the search adapter has data in it already, clear the recyclerview
         searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
 
         val db: SQLiteDatabase = dictionaryDbHelper.readableDatabase
 
-        val sql = """
-            SELECT 
-                kanji, 
-                kana, 
-                english
-            FROM 
-                jmdict_fts
-            WHERE 
-                jmdict_fts MATCH ?
-            ORDER BY 
-                CASE 
-                    WHEN english LIKE 'to %' THEN 0
-                    ELSE 1
-                END,
-                CASE 
-                    WHEN instr(english, ?) > 0 THEN -instr(english, ?)
-                    ELSE -1000 
-                END desc,
-                priority_score;
-        """.trimIndent()
+        // Read the whole content of the SQL file as a single string
+        val inputStream = this.resources.openRawResource(R.raw.search)
+        val bufferedReader = BufferedReader(InputStreamReader(inputStream))
+        val searchSql = bufferedReader.use { it.readText() }
+        val cursor = db.rawQuery(searchSql, arrayOf(query, query, query))
 
-        val cursor = db.rawQuery(sql, arrayOf(query, query, query))
         val searchResults = mutableListOf<Map<String, String>>()
-        while (cursor.moveToNext()) {
+        var resultCount = 0
+        while (cursor.moveToNext() && resultCount < 50) {
             val kanji = cursor.getString(cursor.getColumnIndexOrThrow("kanji"))
             val kana = cursor.getString(cursor.getColumnIndexOrThrow("kana"))
             val english = cursor.getString(cursor.getColumnIndexOrThrow("english"))
@@ -137,17 +116,20 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
             )
 
             searchResults.add(entry)
+            resultCount++
         }
         cursor.close()
+        populateList(searchResults)
+    }
 
+    private fun populateList(searchResults: List<Map<String, String>>) {
         var kanji: String
         var kana: String
         var english: String
-        var index = 0
-        for (item in searchResults) {
-            kana = item["kana"].toString()
+        for ((index, item) in searchResults.withIndex()) {
+            kana = item["kana"].toString().split(",")[0]
             kanji = item["kanji"].toString().ifEmpty { kana }
-            english = item["english"].toString()
+            english = item["english"].toString().split(",").take(3).toString()
 
             starFilled = myDB.checkStarred(kanji, english)
 
@@ -163,51 +145,6 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
                 SearchDataAdapter(this@SearchPage, it)
             }
             searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
-
-            index++
-        }
-    }
-
-    @Serializable
-    data class Kanji(
-        val text: String?,
-        val pri: List<String>? = null
-    )
-
-    @Serializable
-    data class Kana(
-        val text: String,
-        val nokanji: Int,
-        val pri: List<String>? = null
-    )
-
-    @Serializable
-    data class SenseGloss(
-        val lang: String,
-        val text: String
-    )
-
-    @Serializable
-    data class Sense(
-        val pos: List<String>,
-        @SerialName("SenseGloss")
-        val senseGloss: List<SenseGloss>
-    )
-
-    @Serializable
-    data class JMDEntry(
-        val idseq: Int,
-        val kanji: List<Kanji>,
-        val kana: List<Kana>,
-        val senses: List<Sense>
-    )
-
-    private fun parseJson(): Array<JMDEntry> {
-        val jsonArray = JSONArray("")
-        val json = Json { ignoreUnknownKeys = true } // Ignore unknown keys
-        return Array(jsonArray.length()) { i ->
-            val jsonString = jsonArray.getJSONObject(i).toString()
-            json.decodeFromString<JMDEntry>(jsonString)
         }
     }
 
