@@ -1,7 +1,9 @@
 package com.lewiswilson.kiminojisho.search
 
+import DictionaryDatabaseHelper
 import android.content.ContentValues.TAG
 import android.content.Intent
+import android.database.sqlite.SQLiteDatabase
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -29,6 +31,7 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
     private var mSearchList: ArrayList<SearchDataItem>? = ArrayList()
     private var mSearchDataAdapter: SearchDataAdapter? = null
     private val myDB = DatabaseHelper(this)
+    private lateinit var dictionaryDbHelper: DictionaryDatabaseHelper
     var queryTextChangedJob: Job? = null
     var currentJobText = ""
 
@@ -40,6 +43,8 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
         searchPageBind = SearchPageBinding.inflate(layoutInflater)
         setContentView(searchPageBind.root)
         sp = this
+
+        dictionaryDbHelper = DictionaryDatabaseHelper(this)
 
         // setting autofocus on searchview when activity is started
         searchPageBind.svSearchfield.isIconifiedByDefault = false
@@ -78,7 +83,7 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
                             TAG,
                             "onQueryTextChange: Job Started For: $currentJobText, (strlen: ${currentJobText.length})"
                         )
-                        if(newText.isNotEmpty()) dataFromJamdict(newText)
+                        if(newText.isNotEmpty()) search(newText)
                     }
 
                 }
@@ -89,35 +94,60 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
 
     }
 
-    //Jamdict searchData
-    private fun dataFromJamdict(query: String) {
+    private fun search(query: String) {
 
         searchPageBind.tvInfo.visibility = View.INVISIBLE
         //if the search adapter has data in it already, clear the recyclerview
         searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
 
-        /*
-        if(!Python.isStarted()) {
-            Python.start(AndroidPlatform(this))
+        val db: SQLiteDatabase = dictionaryDbHelper.readableDatabase
+
+        val sql = """
+            SELECT 
+                kanji, 
+                kana, 
+                english
+            FROM 
+                jmdict_fts
+            WHERE 
+                jmdict_fts MATCH ?
+            ORDER BY 
+                CASE 
+                    WHEN english LIKE 'to %' THEN 0
+                    ELSE 1
+                END,
+                CASE 
+                    WHEN instr(english, ?) > 0 THEN -instr(english, ?)
+                    ELSE -1000 
+                END desc,
+                priority_score;
+        """.trimIndent()
+
+        val cursor = db.rawQuery(sql, arrayOf(query, query, query))
+        val searchResults = mutableListOf<Map<String, String>>()
+        while (cursor.moveToNext()) {
+            val kanji = cursor.getString(cursor.getColumnIndexOrThrow("kanji"))
+            val kana = cursor.getString(cursor.getColumnIndexOrThrow("kana"))
+            val english = cursor.getString(cursor.getColumnIndexOrThrow("english"))
+
+            val entry = mapOf(
+                "kanji" to kanji,
+                "kana" to kana,
+                "english" to english
+            )
+
+            searchResults.add(entry)
         }
-
-        val py = Python.getInstance()
-        val pyObj = py.getModule("search")
-        val searchResultsJson = pyObj.callAttr("lookup", query).toString()
-        */
-
-        val searchResults = parseJson()
+        cursor.close()
 
         var kanji: String
         var kana: String
         var english: String
-        for ((index, item) in searchResults.withIndex()) {
-            kana = item.kana[0].text
-            kanji = if (item.kanji.isNotEmpty()) item.kanji[0].text!! else kana
-
-            english = item.senses.flatMap { it ->
-                it.senseGloss.map { it.text }
-            }.joinToString(", ")
+        var index = 0
+        for (item in searchResults) {
+            kana = item["kana"].toString()
+            kanji = item["kanji"].toString().ifEmpty { kana }
+            english = item["english"].toString()
 
             starFilled = myDB.checkStarred(kanji, english)
 
@@ -134,6 +164,7 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
             }
             searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
 
+            index++
         }
     }
 
