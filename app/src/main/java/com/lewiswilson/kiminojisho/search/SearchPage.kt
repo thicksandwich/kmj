@@ -1,31 +1,27 @@
 package com.lewiswilson.kiminojisho.search
 
+import DictionaryDatabaseHelper
 import android.content.ContentValues.TAG
 import android.content.Intent
+import android.database.sqlite.SQLiteDatabase
 import android.os.Bundle
 import android.util.Log
 import android.view.View
-import android.widget.Button
 import android.widget.SearchView
-import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.lewiswilson.kiminojisho.*
-import com.lewiswilson.kiminojisho.databinding.MyListBinding
+import com.lewiswilson.kiminojisho.AddWord
+import com.lewiswilson.kiminojisho.DatabaseHelper
+import com.lewiswilson.kiminojisho.R
 import com.lewiswilson.kiminojisho.databinding.SearchPageBinding
-import com.lewiswilson.kiminojisho.json.Japanese
-import com.lewiswilson.kiminojisho.json.JishoData
-import com.lewiswilson.kiminojisho.json.RetrofitClient
 import com.lewiswilson.kiminojisho.mylists.MyListItem
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
-import java.util.*
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
-import java.lang.NullPointerException
-import kotlin.collections.ArrayList
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import kotlin.math.max
 
 class SearchPage : AppCompatActivity(), CoroutineScope {
 
@@ -34,10 +30,9 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
     private var mSearchList: ArrayList<SearchDataItem>? = ArrayList()
     private var mSearchDataAdapter: SearchDataAdapter? = null
     private val myDB = DatabaseHelper(this)
+    private lateinit var dictionaryDbHelper: DictionaryDatabaseHelper
     var queryTextChangedJob: Job? = null
     var currentJobText = ""
-    var networkCalls = 0
-    var call: Call<JishoData>? = null
 
     private val job = Job()
     override val coroutineContext = job + Dispatchers.Main
@@ -47,6 +42,8 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
         searchPageBind = SearchPageBinding.inflate(layoutInflater)
         setContentView(searchPageBind.root)
         sp = this
+
+        dictionaryDbHelper = DictionaryDatabaseHelper(this)
 
         // setting autofocus on searchview when activity is started
         searchPageBind.svSearchfield.isIconifiedByDefault = false
@@ -67,11 +64,9 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
                 return false
             }
             override fun onQueryTextChange(newText: String?): Boolean {
-
                 if (newText != null) {
                     try {
                         mSearchList?.let {
-                            call?.cancel()
                             queryTextChangedJob?.cancel()
                             clearData()
                         }
@@ -80,124 +75,174 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
                     }
 
                     queryTextChangedJob = launch {
-                        delay(350)
                         currentJobText = newText.toString()
                         Log.d(
                             TAG,
                             "onQueryTextChange: Job Started For: $currentJobText, (strlen: ${currentJobText.length})"
                         )
-                        dataFromNetwork(newText)
-                        networkCalls++
-
-                        //logs the number of calls made to check the delay has been applied
-                        Log.d(TAG, "onQueryTextChange: NETWORK CALLS: $networkCalls")
+                        if(newText.isNotEmpty()) search(newText)
                     }
 
                 }
-
                 return true
             }
         })
 
     }
 
-    //get API data
-    private fun dataFromNetwork(query: String) {
+    private fun search(query: String) {
+
+        val isEnglish = containsEnglish(query)
 
         searchPageBind.tvInfo.visibility = View.INVISIBLE
         //if the search adapter has data in it already, clear the recyclerview
         searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
 
-        //if the searchtext contains any japanese...
-        call = RetrofitClient.getInstance().myApi.getData(query)
+        val db: SQLiteDatabase = dictionaryDbHelper.readableDatabase
 
-        call?.enqueue(object : Callback<JishoData> {
-            override fun onResponse(call: Call<JishoData>, response: Response<JishoData>) {
+        // Read the whole content of the SQL file as a single string
+        val inputStream = if (isEnglish) {
+            this.resources.openRawResource(R.raw.search_english)
+        } else {
+            this.resources.openRawResource(R.raw.search_kanji_kana)
+        }
 
-                //At this point we got our word list
-                val data = response.body()?.data
+        val bufferedReader = BufferedReader(InputStreamReader(inputStream))
+        val searchSql = bufferedReader.use { it.readText() }
 
-                //if no data was found, try a call assuming romaji style
-                if (data?.isEmpty() == true) {
-                    searchPageBind.tvInfo.visibility = View.VISIBLE
-                    searchPageBind.tvInfo.text = getString(R.string.no_results)
-                }
+        val cursor = if (isEnglish) {
+            Log.i(TAG, "Searching in English")
+            db.rawQuery(searchSql, arrayOf("$query*"))
+        } else {
+            Log.i(TAG, "Searching in Japanese")
+            db.rawQuery(searchSql, arrayOf("$query*", "$query*"))
+        }
 
-                //try to retrieve data from jishoAPI
-                try {
-                    var japanese: List<Japanese>
-                    var kanji: String?
-                    var kana: String?
-                    var english: String?
-                    for (i in data?.indices!!) {
-                        japanese = data[i].japanese
-                        kanji = japanese[0].word
-                        kana = japanese[0].reading
+        val searchResults = mutableListOf<Map<String, String>>()
+        var resultCount = 0
+        while (cursor.moveToNext() && resultCount < 50) {
+            val kanji = cursor.getString(cursor.getColumnIndexOrThrow("kanji"))
+            val kana = cursor.getString(cursor.getColumnIndexOrThrow("kana"))
+            val english = cursor.getString(cursor.getColumnIndexOrThrow("english"))
 
-                        //if the result has no associated kanji
-                        if (kanji == null) {
-                            kanji = kana
-                        }
+            val entry = mapOf(
+                "kanji" to kanji,
+                "kana" to kana,
+                "english" to english
+            )
 
-                        //get english definitions
-                        val senses = data[i].senses
+            searchResults.add(entry)
+            resultCount++
+        }
+        cursor.close()
 
-                        english = ""
-                        var pos = ""
-                        var notes = ""
-                        for (item in senses) {
-                            val currentDef = item.englishDefinitions.toString()
-                                .replace("[", "").replace("]", "")
-                            english += "$currentDef@@@"
+        if (isEnglish) {
+            // process the search results to account for english definition priority
+            populateList(sortEnglishPriority(query, searchResults))
+        } else {
+            // kanji/kana priority already calculated in database
+            populateList(searchResults)
+        }
 
-                            val currentPos = item.partsOfSpeech.toString()
-                                .replace("[", "").replace("]", "")
-                            pos += "$currentPos@@@"
+    }
 
-                            val currentNotes = item.tags.toString()
-                                .replace("[", "").replace("]", "")
-                            notes += "$currentNotes@@@"
+    private fun containsEnglish(text: String): Boolean {
+        val regex = Regex("[a-zA-Z]")
+        return regex.containsMatchIn(text)
+    }
 
-                        }
-                        english = removeAts(english)
-                        pos = removeAts(pos)
-                        notes = removeAts(notes)
-
-                        starFilled = myDB.checkStarred(kanji, english.split("@@@")[0])
-
-                        // items to view in searchpage activity
-                        mSearchList!!.add(SearchDataItem(kanji, kana,
-                            english.split("@@@")[0], starFilled))
-
-                        // items to view in viewwordremote and viewword
-                        dataItems!!.add(MyListItem(i, kanji, kana, english, pos, notes))
-
-                        mSearchDataAdapter = mSearchList?.let { it ->
-                            SearchDataAdapter(this@SearchPage, it)
-                        }
-                        searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
-                    }
-
-                } catch (e: Exception) {
-                    Log.d("", "Data Retrieval Error: " + e.message)
-                }
+    private val similarityCache = mutableMapOf<Pair<String, String>, Double>()
+    // Function to calculate similarity between two strings
+    private fun calculateSimilarity(definition: String, searchWord: String): Double {
+        val key = Pair(definition, searchWord)
+        return similarityCache.getOrPut(key) {
+            // Normalize the definition by removing "to " prefix if it exists
+            val normalisedDefinition = if (definition.lowercase().startsWith("to ") && !searchWord.lowercase().startsWith("to ")) {
+                definition.substring(3)
+            } else {
+                definition
             }
 
-            override fun onFailure(call: Call<JishoData>, t: Throwable) {
-                //handle error or failure cases here
-                Log.d(TAG, "SearchPage (Error): " + t.message)
+            // Exact match priority
+            if (normalisedDefinition.equals(searchWord, ignoreCase = true)) {
+                return Double.MAX_VALUE
             }
-        })
+
+            // Count common letters between definition and searchWord
+            val commonLetters = normalisedDefinition.zip(searchWord).count { (a, b) -> a == b }
+            // Find the maximum length between definition and searchWord
+            val maxLength = max(normalisedDefinition.length, searchWord.length).toDouble()
+            // Calculate similarity as the ratio of common letters to maximum length
+            commonLetters / maxLength
+        }
+    }
+
+    // Function to process search results and return the sorted list
+    private fun sortEnglishPriority(searchWord: String, searchResults: MutableList<Map<String, String>>): MutableList<Map<String, String>> {
+        // Calculate similarity scores for visible entries in searchResults
+        val scoredResults = searchResults.map { result ->
+            val definition = result["english"] ?: ""
+            // Split the definition into individual items
+            val items = definition.split(",").map { it.trim() }
+            // Calculate the similarity for each item, considering the position priority
+            val maxSimilarity = items.mapIndexedNotNull { index, item ->
+                val positionPriority = 1.0 / (index + 1)  // Higher priority for items closer to the beginning
+                val similarity = calculateSimilarity(item, searchWord)
+                // Exclude items with zero similarity to improve efficiency
+                if (similarity > 0.0) similarity * positionPriority else null
+            }.maxOrNull() ?: 0.0
+
+            // Adjust the score based on the number of items, ensuring exact matches have precedence
+            val numberOfItemsFactor = 1.0 / items.size
+            val adjustedScore = if (maxSimilarity == Double.MAX_VALUE) {
+                Double.MAX_VALUE
+            } else {
+                maxSimilarity * numberOfItemsFactor
+            }
+
+            result + ("similarityScore" to adjustedScore.toString())
+        }.toMutableList()
+
+        // Sort the visible results by similarity score in descending order
+        scoredResults.sortByDescending { it["similarityScore"]?.toDoubleOrNull() ?: 0.0 }
+
+        return scoredResults
+    }
+
+    private fun populateList(searchResults: List<Map<String, String>>) {
+        var kanji: String
+        var kana: String
+        var english: String
+        for ((index, item) in searchResults.withIndex()) {
+            kana = item["kana"].toString().replace(",", ", ")
+            kanji = if (item["kanji"].isNullOrEmpty()){
+                kana
+            } else {
+                item["kanji"].toString()
+            }
+            english = item["english"].toString().replace(",", ", ")
+
+            starFilled = myDB.checkStarred(kanji, english)
+
+            // items to view in searchpage activity
+            mSearchList!!.add(
+                SearchDataItem(kanji, kana, english, starFilled)
+            )
+
+            // items to view in viewwordremote and viewword
+            dataItems!!.add(MyListItem(index, kanji, kana, english, "pos", "notes"))
+
+            mSearchDataAdapter = mSearchList?.let { it ->
+                SearchDataAdapter(this@SearchPage, it)
+            }
+            searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
+        }
     }
 
     fun clearData() {
         dataItems?.clear()
         mSearchList?.clear() // clear list
         mSearchDataAdapter?.notifyDataSetChanged() // let your adapter know about the changes and reload view.
-    }
-
-    fun removeAts(input: String): String {
-        return input.substring(0, input.length - 3)
     }
 
     override fun onDestroy() {

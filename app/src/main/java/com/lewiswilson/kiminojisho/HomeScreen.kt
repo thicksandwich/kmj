@@ -1,11 +1,13 @@
 package com.lewiswilson.kiminojisho
 
-import android.app.*
+import DictionaryDatabaseHelper
+import android.app.Activity
 import android.content.ContentValues.TAG
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -16,20 +18,22 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.lifecycle.lifecycleScope
 import com.elconfidencial.bubbleshowcase.BubbleShowCaseBuilder
 import com.elconfidencial.bubbleshowcase.BubbleShowCaseSequence
 import com.lewiswilson.kiminojisho.databinding.HomeScreenBinding
 import com.lewiswilson.kiminojisho.flashcards.FlashcardsHome
 import com.lewiswilson.kiminojisho.mylists.ListSelection
 import com.lewiswilson.kiminojisho.search.SearchPage
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileInputStream
-import java.util.*
-
 
 class HomeScreen : AppCompatActivity() {
 
     lateinit var homeScreenBind: HomeScreenBinding
+    // For initializing the embedded dictionary database
+    private lateinit var dictionaryDbHelper: DictionaryDatabaseHelper
 
     private val prefsName = "MyPrefs"
     private var myDB: DatabaseHelper? = DatabaseHelper(this)
@@ -39,10 +43,22 @@ class HomeScreen : AppCompatActivity() {
         homeScreenBind = HomeScreenBinding.inflate(layoutInflater)
         setContentView(homeScreenBind.root)
 
+        // Initialize dictionaryDbHelper here
+        dictionaryDbHelper = DictionaryDatabaseHelper(this)
 
         val prefs = getSharedPreferences(prefsName, Context.MODE_PRIVATE)
         //Check if it is a first time launch
         if (prefs.getBoolean("first_launch", true)) {
+
+            lifecycleScope.launch {
+                val result = initialiseDictionaryDb()
+                if (result == "success") {
+                    Toast.makeText(this@HomeScreen, "Database initialization complete", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@HomeScreen, "Database initialization error", Toast.LENGTH_SHORT).show()
+                }
+            }
+
             helpDisplay()
             prefs.edit().putBoolean("first_launch", false).apply()
             prefs.edit().putBoolean("notifications_on", false).apply()
@@ -85,14 +101,26 @@ class HomeScreen : AppCompatActivity() {
                 exportDatabase()
                 true
             }
-
-
             else -> super.onOptionsItemSelected(item)
         }
     }
 
-    private fun helpDisplay() {
+    private fun initialiseDictionaryDb(): String? {
+        val db: SQLiteDatabase = dictionaryDbHelper.writableDatabase
+        dictionaryDbHelper.executeSqlFile(this@HomeScreen, db, R.raw.create_fts_table)
 
+        // Perform a sample query to verify the data
+        val cursor = db.rawQuery("SELECT name FROM sqlite_master WHERE type='table';", null)
+        return if (cursor.moveToFirst()) {
+            "success"
+        } else {
+            null
+        }.also {
+            cursor.close()
+        }
+    }
+
+    private fun helpDisplay() {
         val title = BubbleShowCaseBuilder(this)
             .title("Welcome to KiminoJisho!")
             .description("This app will help you learn Japanese by using spaced repitition (SRS) style flashcards on the Japanese words YOU choose!")
