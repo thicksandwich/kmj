@@ -21,6 +21,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import kotlin.math.max
 
 class SearchPage : AppCompatActivity(), CoroutineScope {
 
@@ -90,6 +91,9 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
     }
 
     private fun search(query: String) {
+
+        val isEnglish = containsEnglish(query)
+
         searchPageBind.tvInfo.visibility = View.INVISIBLE
         //if the search adapter has data in it already, clear the recyclerview
         searchPageBind.rvSearchdata.adapter = mSearchDataAdapter
@@ -97,10 +101,22 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
         val db: SQLiteDatabase = dictionaryDbHelper.readableDatabase
 
         // Read the whole content of the SQL file as a single string
-        val inputStream = this.resources.openRawResource(R.raw.search)
+        val inputStream = if (isEnglish) {
+            this.resources.openRawResource(R.raw.search_english)
+        } else {
+            this.resources.openRawResource(R.raw.search_kanji_kana)
+        }
+
         val bufferedReader = BufferedReader(InputStreamReader(inputStream))
         val searchSql = bufferedReader.use { it.readText() }
-        val cursor = db.rawQuery(searchSql, arrayOf(query, query, query))
+
+        val cursor = if (isEnglish) {
+            Log.i(TAG, "Searching in English")
+            db.rawQuery(searchSql, arrayOf("$query*"))
+        } else {
+            Log.i(TAG, "Searching in Japanese")
+            db.rawQuery(searchSql, arrayOf("$query*", "$query*"))
+        }
 
         val searchResults = mutableListOf<Map<String, String>>()
         var resultCount = 0
@@ -119,7 +135,78 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
             resultCount++
         }
         cursor.close()
-        populateList(searchResults)
+
+        if (isEnglish) {
+            // process the search results to account for english definition priority
+            populateList(sortEnglishPriority(query, searchResults))
+        } else {
+            // kanji/kana priority already calculated in database
+            populateList(searchResults)
+        }
+
+    }
+
+    private fun containsEnglish(text: String): Boolean {
+        val regex = Regex("[a-zA-Z]")
+        return regex.containsMatchIn(text)
+    }
+
+    private val similarityCache = mutableMapOf<Pair<String, String>, Double>()
+    // Function to calculate similarity between two strings
+    private fun calculateSimilarity(definition: String, searchWord: String): Double {
+        val key = Pair(definition, searchWord)
+        return similarityCache.getOrPut(key) {
+            // Normalize the definition by removing "to " prefix if it exists
+            val normalisedDefinition = if (definition.lowercase().startsWith("to ") && !searchWord.lowercase().startsWith("to ")) {
+                definition.substring(3)
+            } else {
+                definition
+            }
+
+            // Exact match priority
+            if (normalisedDefinition.equals(searchWord, ignoreCase = true)) {
+                return Double.MAX_VALUE
+            }
+
+            // Count common letters between definition and searchWord
+            val commonLetters = normalisedDefinition.zip(searchWord).count { (a, b) -> a == b }
+            // Find the maximum length between definition and searchWord
+            val maxLength = max(normalisedDefinition.length, searchWord.length).toDouble()
+            // Calculate similarity as the ratio of common letters to maximum length
+            commonLetters / maxLength
+        }
+    }
+
+    // Function to process search results and return the sorted list
+    private fun sortEnglishPriority(searchWord: String, searchResults: MutableList<Map<String, String>>): MutableList<Map<String, String>> {
+        // Calculate similarity scores for visible entries in searchResults
+        val scoredResults = searchResults.map { result ->
+            val definition = result["english"] ?: ""
+            // Split the definition into individual items
+            val items = definition.split(",").map { it.trim() }
+            // Calculate the similarity for each item, considering the position priority
+            val maxSimilarity = items.mapIndexedNotNull { index, item ->
+                val positionPriority = 1.0 / (index + 1)  // Higher priority for items closer to the beginning
+                val similarity = calculateSimilarity(item, searchWord)
+                // Exclude items with zero similarity to improve efficiency
+                if (similarity > 0.0) similarity * positionPriority else null
+            }.maxOrNull() ?: 0.0
+
+            // Adjust the score based on the number of items, ensuring exact matches have precedence
+            val numberOfItemsFactor = 1.0 / items.size
+            val adjustedScore = if (maxSimilarity == Double.MAX_VALUE) {
+                Double.MAX_VALUE
+            } else {
+                maxSimilarity * numberOfItemsFactor
+            }
+
+            result + ("similarityScore" to adjustedScore.toString())
+        }.toMutableList()
+
+        // Sort the visible results by similarity score in descending order
+        scoredResults.sortByDescending { it["similarityScore"]?.toDoubleOrNull() ?: 0.0 }
+
+        return scoredResults
     }
 
     private fun populateList(searchResults: List<Map<String, String>>) {
@@ -127,9 +214,13 @@ class SearchPage : AppCompatActivity(), CoroutineScope {
         var kana: String
         var english: String
         for ((index, item) in searchResults.withIndex()) {
-            kana = item["kana"].toString().split(",")[0]
-            kanji = item["kanji"].toString().ifEmpty { kana }
-            english = item["english"].toString().split(",").take(3).toString()
+            kana = item["kana"].toString().replace(",", ", ")
+            kanji = if (item["kanji"].isNullOrEmpty()){
+                kana
+            } else {
+                item["kanji"].toString()
+            }
+            english = item["english"].toString().replace(",", ", ")
 
             starFilled = myDB.checkStarred(kanji, english)
 
