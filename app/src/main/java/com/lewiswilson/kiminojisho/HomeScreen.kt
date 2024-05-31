@@ -2,6 +2,7 @@ package com.lewiswilson.kiminojisho
 
 import DictionaryDatabaseHelper
 import android.app.Activity
+import android.app.Dialog
 import android.content.ContentValues.TAG
 import android.content.Context
 import android.content.DialogInterface
@@ -21,17 +22,19 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.elconfidencial.bubbleshowcase.BubbleShowCaseBuilder
 import com.elconfidencial.bubbleshowcase.BubbleShowCaseSequence
+import com.google.android.material.snackbar.Snackbar
 import com.lewiswilson.kiminojisho.databinding.HomeScreenBinding
 import com.lewiswilson.kiminojisho.flashcards.FlashcardsHome
 import com.lewiswilson.kiminojisho.mylists.ListSelection
 import com.lewiswilson.kiminojisho.search.SearchPage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileInputStream
 
 class HomeScreen : AppCompatActivity() {
 
-    lateinit var homeScreenBind: HomeScreenBinding
+    private lateinit var homeScreenBind: HomeScreenBinding
     // For initializing the embedded dictionary database
     private lateinit var dictionaryDbHelper: DictionaryDatabaseHelper
 
@@ -43,6 +46,11 @@ class HomeScreen : AppCompatActivity() {
         homeScreenBind = HomeScreenBinding.inflate(layoutInflater)
         setContentView(homeScreenBind.root)
 
+        // Initialize ProgressDialog
+        val dbInitDialog = Dialog(this)
+        dbInitDialog.setContentView(R.layout.db_init_dialog)
+        dbInitDialog.setCancelable(false)
+
         // Initialize dictionaryDbHelper here
         dictionaryDbHelper = DictionaryDatabaseHelper(this)
 
@@ -50,12 +58,16 @@ class HomeScreen : AppCompatActivity() {
         //Check if it is a first time launch
         if (prefs.getBoolean("first_launch", true)) {
 
+            // Initialise the JMDict database
+            dbInitDialog.show()
             lifecycleScope.launch {
+                delay(1000)
                 val result = initialiseDictionaryDb()
+                dbInitDialog.dismiss()
                 if (result == "success") {
-                    Toast.makeText(this@HomeScreen, "Database initialization complete", Toast.LENGTH_SHORT).show()
+                    Snackbar.make(homeScreenBind.root, "Database initialization complete", Snackbar.LENGTH_SHORT).show()
                 } else {
-                    Toast.makeText(this@HomeScreen, "Database initialization error", Toast.LENGTH_SHORT).show()
+                    Snackbar.make(homeScreenBind.root, "Database initialization error", Snackbar.LENGTH_SHORT).show()
                 }
             }
 
@@ -106,17 +118,35 @@ class HomeScreen : AppCompatActivity() {
     }
 
     private fun initialiseDictionaryDb(): String? {
-        val db: SQLiteDatabase = dictionaryDbHelper.writableDatabase
-        dictionaryDbHelper.executeSqlFile(this@HomeScreen, db, R.raw.create_fts_table)
+        return try {
+            val db: SQLiteDatabase = dictionaryDbHelper.writableDatabase
+            dictionaryDbHelper.executeSqlFile(this@HomeScreen, db, R.raw.create_fts_table)
 
-        // Perform a sample query to verify the data
-        val cursor = db.rawQuery("SELECT name FROM sqlite_master WHERE type='table';", null)
-        return if (cursor.moveToFirst()) {
-            "success"
-        } else {
-            null
-        }.also {
+            // Perform a sample query to verify the data
+            val cursor = db.rawQuery("SELECT * FROM jmdict_fts WHERE entry_id MATCH '9999999';", null)
+
+            // Check if the query returned any rows
+            val success = if (cursor.moveToFirst()) {
+                // Retrieve the value of the "kanji" column from the cursor
+                val kanjiColumnIndex = cursor.getColumnIndexOrThrow("kanji")
+                val kanjiValue = cursor.getString(kanjiColumnIndex)
+
+                // Check if the retrieved value matches the expected value
+                kanjiValue == "ＪＭｄｉｃｔ"
+            } else {
+                false
+            }
             cursor.close()
+            db.close()
+
+            if (success) {
+                "success"
+            } else {
+                "Table creation failed (entry_id 9999999 in the JMdict_fts table, does not correspond to the kanji value \"ＪＭｄｉｃｔ\")"
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            "Database initialization error: ${e.message}"
         }
     }
 
